@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<base href="/nochoerp/">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#0d0d14">
+<title>NocheERP — Dashboard</title>
+<script src="/config.js"></script>
+<link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+<div class="app-shell">
+
+  <!-- SIDEBAR (generado por JS) -->
+  <div id="sidebar-mount"></div>
+
+  <div class="main-area">
+    <!-- TOPBAR -->
+    <div id="topbar-mount"></div>
+
+    <div class="page-content">
+      <div class="page-header">
+        <div class="page-header-row">
+          <div>
+            <h1>Dashboard</h1>
+            <p id="evento-sub">Cargando evento activo...</p>
+          </div>
+          <button class="btn btn-primary" onclick="location.href='/pages/eventos.html'">+ Nuevo evento</button>
+        </div>
+      </div>
+
+      <!-- ALERTAS -->
+      <div id="alertas-container"></div>
+
+      <!-- KPIs -->
+      <div class="metrics-grid" id="kpis-grid">
+        <div class="metric-card green"><div class="metric-label">Ingreso total</div><div class="metric-value green" id="kpi-ingresos">—</div><div class="metric-sub" id="kpi-ingresos-sub">evento actual</div></div>
+        <div class="metric-card red"><div class="metric-label">Egresos</div><div class="metric-value red" id="kpi-egresos">—</div></div>
+        <div class="metric-card purple"><div class="metric-label">Resultado neto</div><div class="metric-value" style="color:var(--accent2)" id="kpi-neto">—</div></div>
+        <div class="metric-card blue"><div class="metric-label">Asistentes</div><div class="metric-value blue" id="kpi-asistentes">—</div></div>
+        <div class="metric-card amber"><div class="metric-label">Consumo promedio</div><div class="metric-value amber" id="kpi-consumo">—</div></div>
+        <div class="metric-card green"><div class="metric-label">Posición de caja</div><div class="metric-value green" id="kpi-caja">—</div><div class="metric-sub">todas las cajas</div></div>
+      </div>
+
+      <div class="two-col">
+        <!-- Ingresos por punto -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">Ingresos por punto de venta</div>
+            <span class="badge green" id="badge-evento">—</span>
+          </div>
+          <div id="ingresos-list"><div class="text-muted" style="font-size:13px;padding:8px 0">Cargando...</div></div>
+        </div>
+
+        <!-- Rendiciones pendientes -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">Rendiciones pendientes</div>
+            <button class="btn btn-ghost btn-sm" onclick="location.href='/pages/admin.html'">Ver todas</button>
+          </div>
+          <div id="rendiciones-list"><div class="text-muted" style="font-size:13px;padding:8px 0">Cargando...</div></div>
+        </div>
+      </div>
+
+      <!-- Últimos eventos -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Últimos eventos</div>
+          <button class="btn btn-ghost btn-sm" onclick="location.href='/pages/eventos.html'">Ver todos</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Evento</th><th>Fecha</th><th>Asistentes</th><th>Ingresos</th><th>Resultado</th><th>Estado</th></tr></thead>
+            <tbody id="eventos-tbody"><tr><td colspan="6" style="text-align:center;color:var(--text3);padding:20px">Cargando...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script src="/js/app.js"></script>
+<script>
+async function main() {
+  // Montar sidebar y topbar
+  document.getElementById('sidebar-mount').innerHTML = Sidebar.html()
+  document.getElementById('topbar-mount').innerHTML  = Sidebar.topbarHTML('Dashboard')
+
+  setLoading(true)
+
+  const perfil = await Auth.init()
+  if (!perfil) return
+  Sidebar.init()
+
+  const evento = await EventoActivo.cargar()
+  if (evento) {
+    document.getElementById('evento-sub').textContent = evento.nombre + ' · ' + fmtDate(evento.fecha)
+    document.getElementById('event-badge').textContent = evento.nombre
+    document.getElementById('event-badge').style.display = 'flex'
+    document.getElementById('badge-evento').textContent = evento.nombre
+    await cargarDashboard(evento.id)
+  } else {
+    document.getElementById('evento-sub').textContent = 'Sin evento activo'
+  }
+
+  await cargarEventos()
+  await Alertas.cargarConteo()
+  Alertas.suscribir()
+
+  // Realtime: actualizar KPIs cuando cambian ingresos
+  if (evento) {
+    suscribirTabla('evento_ingresos', `evento_id=eq.${evento.id}`, () => cargarDashboard(evento.id))
+    suscribirTabla('rendiciones', `evento_id=eq.${evento.id}`, () => cargarRendicionesPendientes(evento.id))
+  }
+
+  setLoading(false)
+}
+
+async function cargarDashboard(evento_id) {
+  // Ingresos del evento
+  const { data: ingresos } = await SB
+    .from('evento_ingresos')
+    .select('nombre_caja, importe')
+    .eq('evento_id', evento_id)
+    .order('importe', { ascending: false })
+
+  const totalIngresos = (ingresos || []).reduce((s, i) => s + i.importe, 0)
+
+  // Egresos
+  const { data: egresos } = await SB
+    .from('evento_egresos')
+    .select('importe')
+    .eq('evento_id', evento_id)
+    .eq('corresponde_evento', true)
+
+  const totalEgresos = (egresos || []).reduce((s, e) => s + e.importe, 0)
+
+  // Asistentes
+  const { data: evento } = await SB
+    .from('eventos')
+    .select('asistentes, consumo_promedio')
+    .eq('id', evento_id)
+    .single()
+
+  // Posición cajas
+  const { data: cajas } = await SB.from('cajas').select('saldo_actual').eq('activo', true)
+  const totalCajas = (cajas || []).reduce((s, c) => s + c.saldo_actual, 0)
+
+  // Alertas sin leer
+  const { data: alertas } = await SB
+    .from('alertas')
+    .select('tipo, titulo, nivel')
+    .eq('leida', false)
+    .order('created_at', { ascending: false })
+    .limit(3)
+
+  // Actualizar KPIs
+  document.getElementById('kpi-ingresos').textContent = fmt(totalIngresos)
+  document.getElementById('kpi-egresos').textContent  = fmt(totalEgresos)
+  const neto = totalIngresos - totalEgresos
+  const netoEl = document.getElementById('kpi-neto')
+  netoEl.textContent = fmt(neto)
+  netoEl.style.color = neto >= 0 ? 'var(--green)' : 'var(--red)'
+  document.getElementById('kpi-asistentes').textContent = (evento?.asistentes || 0).toLocaleString('es-AR')
+  document.getElementById('kpi-consumo').textContent    = fmt(evento?.consumo_promedio || 0)
+  document.getElementById('kpi-caja').textContent       = fmt(totalCajas)
+
+  // Ingresos por punto
+  const ingList = document.getElementById('ingresos-list')
+  if (!ingresos?.length) {
+    ingList.innerHTML = '<div class="text-muted" style="font-size:13px;padding:8px 0">Sin ingresos registrados aún.</div>'
+  } else {
+    ingList.innerHTML = ingresos.map(i => {
+      const pct = totalIngresos > 0 ? Math.round(i.importe / totalIngresos * 100) : 0
+      return `<div class="list-item">
+        <div><div style="font-size:13px">${i.nombre_caja}</div></div>
+        <div style="text-align:right">
+          <div class="mono text-green fw-bold" style="font-size:13px">${fmt(i.importe)}</div>
+          <div style="font-size:10px;color:var(--text3)">${pct}%</div>
+        </div>
+      </div>`
+    }).join('')
+  }
+
+  // Alertas
+  const alertCont = document.getElementById('alertas-container')
+  alertCont.innerHTML = (alertas || []).map(a => `
+    <div class="alert ${a.nivel === 'danger' ? 'danger' : 'warning'}">
+      ⚠ ${a.titulo}
+    </div>`).join('')
+
+  cargarRendicionesPendientes(evento_id)
+}
+
+async function cargarRendicionesPendientes(evento_id) {
+  const { data } = await SB
+    .from('rendiciones')
+    .select('id, estado, diferencia_caja, cajero:cajero_id(nombre), punto_venta:punto_venta_id(nombre)')
+    .eq('evento_id', evento_id)
+    .eq('estado', 'presentado')
+    .order('created_at', { ascending: false })
+    .limit(5)
+
+  const el = document.getElementById('rendiciones-list')
+  if (!data?.length) {
+    el.innerHTML = '<div class="text-muted" style="font-size:13px;padding:8px 0">Sin rendiciones pendientes.</div>'
+    return
+  }
+
+  el.innerHTML = data.map(r => {
+    const dif = r.diferencia_caja || 0
+    const difColor = dif === 0 ? 'var(--green)' : dif > 0 ? 'var(--amber)' : 'var(--red)'
+    return `<div class="list-item">
+      <div>
+        <div style="font-size:13px;font-weight:600">${r.cajero?.nombre || '—'}</div>
+        <div style="font-size:11px;color:var(--text3)">${r.punto_venta?.nombre || '—'}</div>
+      </div>
+      <div style="text-align:right">
+        <div class="mono fw-bold" style="color:${difColor};font-size:13px">${fmtSigned(dif)}</div>
+        <span class="badge amber" style="font-size:10px">Pendiente</span>
+      </div>
+    </div>`
+  }).join('')
+}
+
+async function cargarEventos() {
+  const { data } = await SB
+    .from('vista_eventos_resumen')
+    .select('*')
+    .order('fecha', { ascending: false })
+    .limit(6)
+
+  const tbody = document.getElementById('eventos-tbody')
+  if (!data?.length) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text3);padding:20px">Sin eventos registrados.</td></tr>'
+    return
+  }
+
+  const estadoBadge = {
+    activo:    'amber',
+    liquidado: 'green',
+    cerrado:   'blue',
+    borrador:  'gray'
+  }
+
+  tbody.innerHTML = data.map(e => {
+    const res = e.resultado_neto || 0
+    const resColor = res >= 0 ? 'var(--green)' : 'var(--red)'
+    return `<tr>
+      <td style="font-weight:600">${e.nombre}</td>
+      <td class="td-mono">${fmtDate(e.fecha)}</td>
+      <td class="td-mono">${(e.asistentes || 0).toLocaleString('es-AR')}</td>
+      <td class="td-mono text-green">${fmt(e.total_ingresos || 0)}</td>
+      <td class="td-mono fw-bold" style="color:${resColor}">${fmtSigned(res)}</td>
+      <td><span class="badge ${estadoBadge[e.estado] || 'gray'}">${e.estado}</span></td>
+    </tr>`
+  }).join('')
+}
+
+main()
+</script>
+</body>
+</html>

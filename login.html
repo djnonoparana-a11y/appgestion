@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<base href="/nochoerp/">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta name="theme-color" content="#0d0d14">
+<title>NocheERP — Ingresar</title>
+<script src="/config.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#0d0d14;--bg2:#13131e;--bg3:#1a1a28;--border:#2e2e44;--text:#e8e8f4;--text2:#8888a8;--accent:#7c6cf0;--accent2:#a89ef8;--accent3:#2a2450;--red:#f05252;--red-bg:#2e0808}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
+body{display:flex;align-items:center;justify-content:center;padding:20px;min-height:100vh}
+.login-card{background:var(--bg2);border:1px solid var(--border);border-radius:20px;padding:36px 28px;width:100%;max-width:380px}
+.logo{font-family:'SF Mono',Consolas,monospace;font-size:22px;font-weight:800;color:var(--accent2);letter-spacing:-1px;margin-bottom:4px}
+.logo span{color:#4a4a68}
+.tagline{font-size:13px;color:var(--text2);margin-bottom:32px}
+.field{display:flex;flex-direction:column;gap:6px;margin-bottom:16px}
+.label{font-size:11px;color:var(--text2);font-weight:700;text-transform:uppercase;letter-spacing:.5px}
+.input{background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:13px 14px;color:var(--text);font-size:15px;width:100%;outline:none;transition:border .15s;-webkit-appearance:none}
+.input:focus{border-color:var(--accent)}
+.btn-login{width:100%;background:var(--accent);border:none;border-radius:12px;padding:14px;font-size:15px;font-weight:700;color:#fff;cursor:pointer;margin-top:8px;transition:background .15s}
+.btn-login:hover{background:var(--accent2);color:var(--bg)}
+.btn-login:disabled{opacity:.5;cursor:not-allowed}
+.error-msg{background:var(--red-bg);border:1px solid rgba(240,82,82,.3);border-radius:8px;padding:10px 14px;color:var(--red);font-size:13px;margin-bottom:16px;display:none}
+.divider{display:flex;align-items:center;gap:12px;margin:20px 0}
+.divider::before,.divider::after{content:'';flex:1;height:1px;background:var(--border)}
+.divider span{font-size:11px;color:var(--text2)}
+.roles-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.role-demo{padding:10px 12px;background:var(--bg3);border:1px solid var(--border);border-radius:10px;cursor:pointer;transition:border .15s}
+.role-demo:hover{border-color:var(--accent)}
+.role-demo .name{font-size:12px;font-weight:700;margin-bottom:2px}
+.role-demo .email{font-size:10px;color:var(--text2)}
+.footer-note{font-size:11px;color:var(--text2);text-align:center;margin-top:24px;line-height:1.6}
+</style>
+</head>
+<body>
+<div class="login-card">
+  <div class="logo">NOCHE<span>ERP</span></div>
+  <div class="tagline">Sistema de gestión para negocios nocturnos</div>
+
+  <div class="error-msg" id="error-msg"></div>
+
+  <div class="field">
+    <div class="label">Email</div>
+    <input class="input" type="email" id="email" placeholder="tu@email.com" autocomplete="email" inputmode="email">
+  </div>
+  <div class="field">
+    <div class="label">Contraseña</div>
+    <input class="input" type="password" id="password" placeholder="••••••••" autocomplete="current-password">
+  </div>
+
+  <button class="btn-login" id="btn-login" onclick="login()">Ingresar</button>
+
+  <div class="divider"><span>acceso rápido demo</span></div>
+
+  <div class="roles-grid">
+    <div class="role-demo" onclick="loginDemo('admin@nochoerp.com','demo1234')">
+      <div class="name" style="color:#a89ef8">Admin</div>
+      <div class="email">Control total</div>
+    </div>
+    <div class="role-demo" onclick="loginDemo('cajero@nochoerp.com','demo1234')">
+      <div class="name" style="color:#22c978">Cajero</div>
+      <div class="email">Solo rendiciones</div>
+    </div>
+    <div class="role-demo" onclick="loginDemo('produccion@nochoerp.com','demo1234')">
+      <div class="name" style="color:#4a9ef0">Producción</div>
+      <div class="email">Eventos y egresos</div>
+    </div>
+    <div class="role-demo" onclick="loginDemo('socio@nochoerp.com','demo1234')">
+      <div class="name" style="color:#f0b429">Socio</div>
+      <div class="email">Reportes y liquidaciones</div>
+    </div>
+  </div>
+
+  <div class="footer-note">
+    NocheERP · Paraná, Entre Ríos<br>
+    Soporte: sistema@nochoerp.com
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script>
+const SB = supabase.createClient(window.__SUPABASE_URL__, window.__SUPABASE_ANON_KEY__)
+
+// Si ya tiene sesión, redirigir
+SB.auth.getSession().then(({ data: { session } }) => {
+  if (session) redirigirPorRol(session.user.id)
+})
+
+async function login() {
+  const email    = document.getElementById('email').value.trim()
+  const password = document.getElementById('password').value
+  if (!email || !password) { mostrarError('Completá email y contraseña.'); return }
+  await ejecutarLogin(email, password)
+}
+
+async function loginDemo(email, password) {
+  document.getElementById('email').value = email
+  document.getElementById('password').value = password
+  await ejecutarLogin(email, password)
+}
+
+async function ejecutarLogin(email, password) {
+  const btn = document.getElementById('btn-login')
+  btn.disabled = true
+  btn.textContent = 'Ingresando...'
+  ocultarError()
+
+  try {
+    const { data, error } = await SB.auth.signInWithPassword({ email, password })
+    if (error) throw error
+    await redirigirPorRol(data.user.id)
+  } catch (err) {
+    mostrarError('Email o contraseña incorrectos.')
+    btn.disabled = false
+    btn.textContent = 'Ingresar'
+  }
+}
+
+async function redirigirPorRol(userId) {
+  const { data: perfil } = await SB
+    .from('perfiles').select('rol').eq('id', userId).single()
+
+  const destinos = {
+    admin:      '/index.html',
+    produccion: '/pages/eventos.html',
+    cajero:     '/pages/rendicion.html',
+    socio:      '/pages/liquidacion.html'
+  }
+  window.location.href = destinos[perfil?.rol] || '/index.html'
+}
+
+function mostrarError(msg) {
+  const el = document.getElementById('error-msg')
+  el.textContent = msg
+  el.style.display = 'block'
+}
+function ocultarError() {
+  document.getElementById('error-msg').style.display = 'none'
+}
+
+// Enter para login
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter') login()
+})
+</script>
+</body>
+</html>
